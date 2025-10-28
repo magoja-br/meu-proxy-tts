@@ -23,6 +23,7 @@ if (!apiKey || apiKey === "SUA_CHAVE_API_REAL_AQUI" || apiKey.length < 10) {
 }
 
 // --- Configuração do CORS (LISTA CORRIGIDA) ---
+// Lista dos endereços (origens) permitidos a acessar este backend
 const allowedOrigins = [
   'http://localhost', // Para testes locais (npx serve, etc.)
   'http://127.0.0.1', // Para testes locais (Live Server, etc.)
@@ -34,15 +35,16 @@ const allowedOrigins = [
   'https://magoja-br.github.io/meu-leitor-web',
   'https://magoja-br.github.io/minha-biblia-web',
   
-  // URL BASE (Adicionado para corrigir o erro de CORS)
+  // URL BASE (Adicionado para corrigir o erro de CORS de 'https://magoja-br.github.io')
   'https://magoja-br.github.io' 
 ];
 // --------------------------------------------------
 
 app.use(cors({
   origin: function (origin, callback) {
-    // A lógica 'startsWith' permite que 'https://magoja-br.github.io/texto-mp3/' 
-    // funcione, mesmo que 'https://magoja-br.github.io/texto-mp3' esteja na lista.
+    // MODIFICADO: Verifica se a origem COMEÇA COM um dos URLs permitidos
+    // Isto permite subpáginas como /catecismo-web/index.html
+    // E também trata o caso de a origem ser 'https://magoja-br.github.io'
     if (!origin || origin === 'null' || allowedOrigins.some(allowed => origin.startsWith(allowed))) {
       callback(null, true);
     } else {
