@@ -25,15 +25,14 @@ if (!apiKey || apiKey === "SUA_CHAVE_API_REAL_AQUI" || apiKey.length < 10) {
 // --- Configuração do CORS ---
 // Lista dos endereços (origens) permitidos a acessar este backend
 const allowedOrigins = [
-  // Adicione aqui os endereços onde seus sites ESTARÃO hospedados online
-  // Exemplo: 'https://www.meusite1.com', 'https://meuoutroprojeto.github.io'
-
-  // Para testes locais, mantenha estas linhas:
-  'http://localhost', // Se você usar um servidor local para testar o frontend
-  'http://127.0.0.1', // Outra forma de acessar localmente
-  'null' // Necessário para permitir abrir arquivos HTML diretamente (origin: null)
+  'http://localhost',
+  'http://127.0.0.1',
+  'null',
+  'https://magoja-br.github.io/catecismo-web/', // Verifique o nome exato e a barra final
+  'https://magoja-br.github.io/texto-mp3/',     // Verifique o nome exato e a barra final
+  'https://magoja-br.github.io/meu-leitor-web/', // Verifique o nome exato e a barra final
+  'https://magoja-br.github.io/minha-biblia-web/'  // Verifique o nome exato e a barra final
 ];
-
 app.use(cors({
   origin: function (origin, callback) {
     // Permite requisições sem 'origin' (como testes locais de arquivo) OU se a origem está na lista
