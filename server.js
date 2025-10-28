@@ -1,42 +1,48 @@
 // server.js
 
-// Carrega a chave do arquivo .env
+// Carrega a chave do arquivo .env (apenas localmente)
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 
 const app = express();
-// Usa a porta definida no ambiente (para deploy) ou 3000 como padrão
+// Usa a porta definida no ambiente (para deploy no Render) ou 3000 como padrão
 const port = process.env.PORT || 3000;
+// A chave API é lida das Variáveis de Ambiente do Render (online) ou do .env (local)
 const apiKey = process.env.GOOGLE_TTS_API_KEY;
 
 // Verificação crucial da chave de API
 if (!apiKey || apiKey === "SUA_CHAVE_API_REAL_AQUI" || apiKey.length < 10) {
   console.error("---------------------------------------------------------");
   console.error(" ERRO FATAL: Chave da API do Google não configurada      ");
-  console.error(" Verifique se o arquivo .env existe na pasta             ");
-  console.error(" D:\\OneDrive\\Documentos\\Backend_Services\\meu-proxy-tts ");
-  console.error(" e contém a linha: GOOGLE_TTS_API_KEY=SUA_CHAVE_REAL ");
+  console.error(" Verifique as Variáveis de Ambiente no Render (online)   ");
+  console.error(" ou o arquivo .env (local).                            ");
   console.error("---------------------------------------------------------");
-  process.exit(1); // Encerra a aplicação
+  process.exit(1); // Encerra a aplicação se a chave não for encontrada
 }
 
-// --- Configuração do CORS ---
-// Lista dos endereços (origens) permitidos a acessar este backend
+// --- Configuração do CORS (LISTA CORRIGIDA) ---
 const allowedOrigins = [
-  'http://localhost',
-  'http://127.0.0.1',
-  'null',
-  'https://magoja-br.github.io/catecismo-web/', // Verifique o nome exato e a barra final
-  'https://magoja-br.github.io/texto-mp3/',     // Verifique o nome exato e a barra final
-  'https://magoja-br.github.io/meu-leitor-web/', // Verifique o nome exato e a barra final
-  'https://magoja-br.github.io/minha-biblia-web/'  // Verifique o nome exato e a barra final
+  'http://localhost', // Para testes locais (npx serve, etc.)
+  'http://127.0.0.1', // Para testes locais (Live Server, etc.)
+  'null',             // Para abrir arquivos file:/// locais
+
+  // URLs dos seus sites no GitHub Pages (sem a barra final)
+  'https://magoja-br.github.io/catecismo-web',
+  'https://magoja-br.github.io/texto-mp3',
+  'https://magoja-br.github.io/meu-leitor-web',
+  'https://magoja-br.github.io/minha-biblia-web',
+  
+  // URL BASE (Adicionado para corrigir o erro de CORS)
+  'https://magoja-br.github.io' 
 ];
+// --------------------------------------------------
+
 app.use(cors({
   origin: function (origin, callback) {
-    // Permite requisições sem 'origin' (como testes locais de arquivo) OU se a origem está na lista
-    // A origem 'null' é comum quando você abre um arquivo HTML diretamente no navegador
+    // A lógica 'startsWith' permite que 'https://magoja-br.github.io/texto-mp3/' 
+    // funcione, mesmo que 'https://magoja-br.github.io/texto-mp3' esteja na lista.
     if (!origin || origin === 'null' || allowedOrigins.some(allowed => origin.startsWith(allowed))) {
       callback(null, true);
     } else {
@@ -119,6 +125,7 @@ app.get('/', (req, res) => {
 
 // Inicia o servidor para escutar na porta definida
 app.listen(port, () => {
+  // Esta mensagem no Render mostrará uma porta interna (ex: 10000), o que é normal.
   console.log(`Servidor proxy TTS iniciado e escutando em http://localhost:${port}`);
   console.log("Origens CORS permitidas (verifique se seus sites estão aqui para deploy):");
   allowedOrigins.forEach(origin => console.log(` - ${origin}`));
