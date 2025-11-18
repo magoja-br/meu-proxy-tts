@@ -1,10 +1,14 @@
-// server.js
+// server.js - Versão com suporte a concatenação de chunks
 
 // Carrega a chave do arquivo .env (apenas localmente)
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const { exec } = require('child_process');
+const fs = require('fs').promises;
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 // Usa a porta definida no ambiente (para deploy no Render) ou 3000 como padrão
@@ -34,7 +38,7 @@ const allowedOrigins = [
   'https://magoja-br.github.io/texto-mp3',
   'https://magoja-br.github.io/meu-leitor-web',
   'https://magoja-br.github.io/minha-biblia-web',
-  
+
   // URL BASE (Adicionado para corrigir o erro de CORS de 'https://magoja-br.github.io')
   'https://magoja-br.github.io' 
 ];
@@ -57,9 +61,9 @@ app.use(cors({
 }));
 // ----------------------------
 
-app.use(express.json()); // Habilita o servidor a entender JSON nas requisições
+app.use(express.json({ limit: '50mb' })); // Habilita o servidor a entender JSON nas requisições (aumentado para chunks)
 
-// Rota principal que seus sites vão chamar
+// Rota principal que seus sites vão chamar (MANTIDA PARA COMPATIBILIDADE)
 app.post('/synthesize', async (req, res) => {
   console.log(`[${new Date().toISOString()}] Requisição recebida para /synthesize`);
   const { text, voice, speed } = req.body;
@@ -120,15 +124,140 @@ app.post('/synthesize', async (req, res) => {
   }
 });
 
+// NOVO: Endpoint para concatenação de múltiplos chunks
+app.post('/synthesize-concat', async (req, res) => {
+  console.log(`[${new Date().toISOString()}] Requisição recebida para /synthesize-concat`);
+  const tempDir = path.join(__dirname, 'temp');
+  const sessionId = uuidv4();
+
+  try {
+    const { chunks, voice, speed } = req.body;
+
+    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
+      console.error("Requisição inválida: Chunks ausentes ou inválidos.");
+      return res.status(400).json({ error: 'Os chunks de texto são obrigatórios.' });
+    }
+
+    console.log(`Processando ${chunks.length} chunk(s) para concatenação...`);
+
+    // Criar diretório temporário se não existir
+    await fs.mkdir(tempDir, { recursive: true });
+
+    // Processar cada chunk e salvar como arquivo MP3
+    const audioFiles = [];
+    const googleApiUrl = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`Processando chunk ${i + 1}/${chunks.length}...`);
+
+      const googleRequestBody = {
+        input: { text: chunks[i] },
+        voice: {
+          languageCode: "pt-BR",
+          name: voice || "pt-BR-Chirp3-HD-Algieba"
+        },
+        audioConfig: {
+          audioEncoding: "MP3",
+          speakingRate: speed || 1.0
+        }
+      };
+
+      // Chamar a API do Google Cloud TTS para cada chunk
+      const googleResponse = await axios.post(googleApiUrl, googleRequestBody);
+
+      if (!googleResponse.data || !googleResponse.data.audioContent) {
+        throw new Error(`Erro na API do Google para chunk ${i + 1}`);
+      }
+
+      // Salvar o áudio em arquivo temporário
+      const filename = path.join(tempDir, `${sessionId}_chunk_${i}.mp3`);
+      await fs.writeFile(filename, Buffer.from(googleResponse.data.audioContent, 'base64'));
+      audioFiles.push(filename);
+      console.log(`Chunk ${i + 1}/${chunks.length} processado e salvo.`);
+    }
+
+    console.log('Todos os chunks processados. Concatenando com FFmpeg...');
+
+    // Criar arquivo de lista para o ffmpeg
+    const listFile = path.join(tempDir, `${sessionId}_list.txt`);
+    const listContent = audioFiles.map(f => `file '${f}'`).join('\n');
+    await fs.writeFile(listFile, listContent);
+
+    // Arquivo de saída
+    const outputFile = path.join(tempDir, `${sessionId}_output.mp3`);
+
+    // Concatenar usando ffmpeg
+    await new Promise((resolve, reject) => {
+      exec(
+        `ffmpeg -f concat -safe 0 -i "${listFile}" -c copy "${outputFile}"`,
+        (error, stdout, stderr) => {
+          if (error) {
+            console.error('Erro no ffmpeg:', stderr);
+            reject(new Error('Erro ao concatenar áudios com FFmpeg.'));
+          } else {
+            console.log('Concatenação concluída com sucesso!');
+            resolve();
+          }
+        }
+      );
+    });
+
+    // Ler o arquivo concatenado e converter para base64
+    const concatenatedAudio = await fs.readFile(outputFile);
+    const audioContent = concatenatedAudio.toString('base64');
+
+    // Limpar arquivos temporários
+    await Promise.all([
+      ...audioFiles.map(f => fs.unlink(f).catch(() => {})),
+      fs.unlink(listFile).catch(() => {}),
+      fs.unlink(outputFile).catch(() => {})
+    ]);
+
+    console.log('Arquivos temporários limpos. Enviando resposta...');
+    res.json({ audioContent });
+
+  } catch (error) {
+    console.error('Erro no /synthesize-concat:', error.message);
+
+    // Tentar limpar arquivos temporários em caso de erro
+    try {
+      const files = await fs.readdir(tempDir);
+      await Promise.all(
+        files
+          .filter(f => f.startsWith(sessionId))
+          .map(f => fs.unlink(path.join(tempDir, f)).catch(() => {}))
+      );
+    } catch (cleanupError) {
+      console.error('Erro ao limpar arquivos temporários:', cleanupError);
+    }
+
+    let errorMessage = 'Erro ao processar concatenação de áudio.';
+    let statusCode = 500;
+
+    if (error.response) {
+      errorMessage = `Erro do Google TTS: ${error.response.data?.error?.message || 'Detalhe indisponível'}`;
+      statusCode = error.response.status >= 400 && error.response.status < 500 ? 400 : 500;
+    } else if (error.message.includes('FFmpeg')) {
+      errorMessage = 'Erro ao concatenar áudios. Verifique se o FFmpeg está instalado no servidor.';
+      statusCode = 500;
+    }
+
+    res.status(statusCode).json({ error: errorMessage });
+  }
+});
+
 // Rota de verificação simples (opcional)
 app.get('/', (req, res) => {
-  res.send('Servidor Proxy TTS está funcionando!');
+  res.send('Servidor Proxy TTS está funcionando! Endpoints: /synthesize e /synthesize-concat');
 });
 
 // Inicia o servidor para escutar na porta definida
 app.listen(port, () => {
   // Esta mensagem no Render mostrará uma porta interna (ex: 10000), o que é normal.
   console.log(`Servidor proxy TTS iniciado e escutando em http://localhost:${port}`);
+  console.log("Endpoints disponíveis:");
+  console.log(" - POST /synthesize (textos únicos)");
+  console.log(" - POST /synthesize-concat (múltiplos chunks com concatenação)");
   console.log("Origens CORS permitidas (verifique se seus sites estão aqui para deploy):");
   allowedOrigins.forEach(origin => console.log(` - ${origin}`));
   console.log("---------------------------------------------------------");
